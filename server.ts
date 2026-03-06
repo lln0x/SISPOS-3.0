@@ -271,7 +271,7 @@ const getSupId = (name: string) => sups.find(s => s.name === name)?.id;
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  let PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -599,9 +599,22 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  const startListening = (port: number) => {
+    const server = app.listen(port, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${port}`);
+    });
+
+    server.on('error', (e: any) => {
+      if (e.code === 'EADDRINUSE') {
+        console.log(`Port ${port} is in use, trying ${port + 1}...`);
+        startListening(port + 1);
+      } else {
+        console.error(e);
+      }
+    });
+  };
+
+  startListening(PORT);
 }
 
 startServer();
