@@ -1,0 +1,90 @@
+export interface Category {
+  id: number;
+  name: string;
+  prefix: string;
+  description: string;
+  status: 'active' | 'inactive';
+  created_at: string;
+}
+
+export interface Product {
+  id: number;
+  code: string;
+  name: string;
+  image?: string;
+  description?: string;
+  category_id: number;
+  category_name?: string;
+  purchase_price: number;
+  sale_price: number;
+  stock: number;
+  min_stock: number;
+  unit: string;
+  brand?: string;
+  supplier_id?: number;
+  status: 'active' | 'inactive';
+  created_at: string;
+}
+
+export interface Supplier {
+  id: number;
+  name: string;
+  company: string;
+  tax_id: string;
+  phone: string;
+  email: string;
+  address: string;
+  city: string;
+  country: string;
+  contact_person: string;
+  notes: string;
+  created_at: string;
+}
+
+export interface Customer {
+  id: number;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  address: string;
+  created_at: string;
+}
+
+export interface SaleItem {
+  id: number;
+  name: string;
+  quantity: number;
+  price: number;
+  subtotal: number;
+}
+
+export interface Sale {
+  id: number;
+  customer_id?: number;
+  total: number;
+  subtotal: number;
+  tax: number;
+  payment_method: 'cash' | 'card' | 'transfer';
+  created_at: string;
+  items?: SaleItem[];
+}
+
+export interface AppSettings {
+  business_name: string;
+  address: string;
+  phone: string;
+  email: string;
+  currency: string;
+  ticket_message: string;
+  business_logo?: string;
+  installation_date?: string;
+  activation_status?: 'demo' | 'activated';
+  // Appearance
+  theme_mode?: 'light' | 'dark';
+  primary_color?: string;
+  // User Profile
+  user_name?: string;
+  user_role?: string;
+  user_avatar?: string;
+}
