@@ -3,6 +3,8 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { createServer } from "http";
+import { Server } from "socket.io";
 
 const db = new Database("pos.db");
 
@@ -36,6 +38,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     first_name TEXT NOT NULL,
     last_name TEXT,
+    dni TEXT UNIQUE,
     phone TEXT,
     email TEXT,
     address TEXT,
@@ -88,6 +91,28 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS quotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER,
+    total REAL NOT NULL,
+    subtotal REAL,
+    tax REAL,
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS quotation_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_id INTEGER,
+    product_id INTEGER,
+    quantity INTEGER,
+    price REAL,
+    subtotal REAL,
+    FOREIGN KEY (quotation_id) REFERENCES quotations(id),
+    FOREIGN KEY (product_id) REFERENCES products(id)
+  );
 `);
 
 // Seed default settings if empty
@@ -137,6 +162,13 @@ if (settingsCount.count === 0) {
     insertSetting.run("business_logo", "");
   }
   
+  // Add DNI column if it doesn't exist
+  try {
+    db.prepare("ALTER TABLE customers ADD COLUMN dni TEXT UNIQUE").run();
+  } catch (e) {
+    // Column already exists
+  }
+
   // Force theme_mode to light
   db.prepare("UPDATE settings SET value = 'light' WHERE key = 'theme_mode'").run();
 }
@@ -271,73 +303,151 @@ const getSupId = (name: string) => sups.find(s => s.name === name)?.id;
 
 async function startServer() {
   const app = express();
+  const httpServer = createServer(app);
+  const io = new Server(httpServer, { cors: { origin: "*" } });
+  
   let PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // API Routes
-  app.get("/api/dashboard/stats", (req, res) => {
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Basic stats
-    const dailySales = db.prepare("SELECT SUM(total) as total FROM sales WHERE date(created_at) = ?").get(today) as any;
-    const weeklySales = db.prepare("SELECT SUM(total) as total FROM sales WHERE created_at >= date('now', '-7 days')").get() as any;
-    const monthlySales = db.prepare("SELECT SUM(total) as total FROM sales WHERE created_at >= date('now', 'start of month')").get() as any;
-    const lowStock = db.prepare("SELECT COUNT(*) as count FROM products WHERE stock <= min_stock").get() as any;
-    const totalProducts = db.prepare("SELECT COUNT(*) as count FROM products").get() as any;
+  io.on('connection', (socket) => {
+    console.log('A user connected');
+    socket.on('disconnect', () => {
+      console.log('User disconnected');
+    });
+  });
 
-    // Sales Trend (Last 7 days)
-    const salesTrend = db.prepare(`
-      SELECT date(created_at) as date, SUM(total) as sales 
-      FROM sales 
-      WHERE created_at >= date('now', '-7 days') 
-      GROUP BY date(created_at) 
-      ORDER BY date(created_at) ASC
-    `).all();
-
-    // Sales by Category
-    const salesByCategory = db.prepare(`
-      SELECT c.name, SUM(si.subtotal) as value
-      FROM sale_items si
-      JOIN products p ON si.product_id = p.id
-      JOIN categories c ON p.category_id = c.id
-      JOIN sales s ON si.sale_id = s.id
-      GROUP BY c.id
-      ORDER BY value DESC
-      LIMIT 5
-    `).all();
-
-    // Recent Sales
-    const recentSales = db.prepare(`
-      SELECT s.id, s.total, s.created_at, s.payment_method, c.first_name, c.last_name
-      FROM sales s
-      LEFT JOIN customers c ON s.customer_id = c.id
-      ORDER BY s.created_at DESC
-      LIMIT 5
-    `).all();
-
-    // Low Stock Products
-    const lowStockProducts = db.prepare(`
-      SELECT id, name, stock, min_stock 
-      FROM products 
-      WHERE stock <= min_stock 
-      ORDER BY stock ASC 
-      LIMIT 5
-    `).all();
-
-    const stats = {
-      dailySales,
-      weeklySales,
-      monthlySales,
-      lowStock,
-      totalProducts,
-      salesTrend,
-      salesByCategory,
-      recentSales,
-      lowStockProducts
+  // Middleware to emit data_changed on successful mutations
+  app.use((req, res, next) => {
+    const originalJson = res.json;
+    res.json = function (body) {
+      if (['POST', 'PUT', 'DELETE'].includes(req.method) && res.statusCode >= 200 && res.statusCode < 300) {
+        // Don't emit for activate endpoint to avoid unnecessary reloads
+        if (!req.path.includes('/api/activate')) {
+          io.emit('data_changed');
+        }
+      }
+      return originalJson.call(this, body);
     };
-    res.json(stats);
+    next();
+  });
+
+  // API Routes
+  app.get("/api/settings", (req, res) => {
+    try {
+      const settings = db.prepare("SELECT * FROM settings").all();
+      const settingsObj = settings.reduce((acc: any, curr: any) => {
+        acc[curr.key] = curr.value;
+        return acc;
+      }, {});
+      res.json(settingsObj);
+    } catch (error) {
+      console.error("Error fetching settings:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.get("/api/dashboard/stats", (req, res) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Basic stats
+      const dailySales = db.prepare("SELECT SUM(total) as total FROM sales WHERE date(created_at) = ?").get(today) as any;
+      const weeklySales = db.prepare("SELECT SUM(total) as total FROM sales WHERE created_at >= date('now', '-7 days')").get() as any;
+      const monthlySales = db.prepare("SELECT SUM(total) as total FROM sales WHERE created_at >= date('now', 'start of month')").get() as any;
+      const lowStock = db.prepare("SELECT COUNT(*) as count FROM products WHERE stock <= min_stock").get() as any;
+      const totalProducts = db.prepare("SELECT COUNT(*) as count FROM products").get() as any;
+
+      // Sales Trend (Last 7 days)
+      const salesTrend = db.prepare(`
+        SELECT date(created_at) as date, SUM(total) as sales 
+        FROM sales 
+        WHERE created_at >= date('now', '-7 days') 
+        GROUP BY date(created_at) 
+        ORDER BY date(created_at) ASC
+      `).all();
+
+      // Sales by Category
+      const salesByCategory = db.prepare(`
+        SELECT c.name, SUM(si.subtotal) as value
+        FROM sale_items si
+        JOIN products p ON si.product_id = p.id
+        JOIN categories c ON p.category_id = c.id
+        JOIN sales s ON si.sale_id = s.id
+        GROUP BY c.id
+        ORDER BY value DESC
+        LIMIT 5
+      `).all();
+
+      // Recent Sales
+      const recentSales = db.prepare(`
+        SELECT s.id, s.total, s.created_at, s.payment_method, c.first_name, c.last_name
+        FROM sales s
+        LEFT JOIN customers c ON s.customer_id = c.id
+        ORDER BY s.created_at DESC
+        LIMIT 5
+      `).all();
+
+      // Low Stock Products
+      const lowStockProducts = db.prepare(`
+        SELECT id, name, stock, min_stock 
+        FROM products 
+        WHERE stock <= min_stock 
+        ORDER BY stock ASC 
+        LIMIT 5
+      `).all();
+
+      const stats = {
+        dailySales,
+        weeklySales,
+        monthlySales,
+        lowStock,
+        totalProducts,
+        salesTrend,
+        salesByCategory,
+        recentSales,
+        lowStockProducts
+      };
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching dashboard stats:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.get("/api/reports/earnings", (req, res) => {
+    try {
+      const { range } = req.query;
+      let dateFilter = "";
+      
+      if (range === 'today') {
+        dateFilter = "WHERE date(s.created_at) = date('now')";
+      } else if (range === 'week') {
+        dateFilter = "WHERE s.created_at >= date('now', '-7 days')";
+      } else if (range === 'month') {
+        dateFilter = "WHERE s.created_at >= date('now', 'start of month')";
+      }
+
+      const earnings = db.prepare(`
+        SELECT 
+          SUM(s.total) as income,
+          SUM(si.quantity * p.purchase_price) as cost
+        FROM sales s
+        JOIN sale_items si ON s.id = si.sale_id
+        JOIN products p ON si.product_id = p.id
+        ${dateFilter}
+      `).get() as any;
+
+      res.json({
+        income: earnings.income || 0,
+        cost: earnings.cost || 0,
+        profit: (earnings.income || 0) - (earnings.cost || 0)
+      });
+    } catch (error) {
+      console.error("Error fetching earnings report:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
   });
 
   app.get("/api/categories", (req, res) => {
@@ -348,6 +458,7 @@ async function startServer() {
   app.post("/api/categories", (req, res) => {
     const { name, prefix, description } = req.body;
     const info = db.prepare("INSERT INTO categories (name, prefix, description) VALUES (?, ?, ?)").run(name, prefix, description);
+    io.emit('data_changed');
     res.json({ id: info.lastInsertRowid });
   });
 
@@ -383,7 +494,7 @@ async function startServer() {
       INSERT INTO products (code, name, category_id, purchase_price, sale_price, stock, min_stock, unit, brand, supplier_id, description, image)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(code, name, category_id, purchase_price, sale_price, stock, min_stock, unit, brand, supplier_id, description, image);
-    
+    io.emit('data_changed');
     res.json({ id: info.lastInsertRowid, code });
   });
 
@@ -417,6 +528,62 @@ async function startServer() {
     res.json({ ...sale, items });
   });
 
+  app.get("/api/quotations", (req, res) => {
+    const quotations = db.prepare(`
+      SELECT q.*, c.first_name, c.last_name 
+      FROM quotations q 
+      LEFT JOIN customers c ON q.customer_id = c.id
+      ORDER BY q.created_at DESC
+    `).all();
+    res.json(quotations);
+  });
+
+  app.get("/api/quotations/:id", (req, res) => {
+    const quotation = db.prepare(`
+      SELECT q.*, c.first_name, c.last_name 
+      FROM quotations q 
+      LEFT JOIN customers c ON q.customer_id = c.id
+      WHERE q.id = ?
+    `).get(req.params.id);
+    
+    if (!quotation) return res.status(404).json({ error: "Quotation not found" });
+    
+    const items = db.prepare(`
+      SELECT qi.*, p.name as product_name, p.code as product_code
+      FROM quotation_items qi
+      JOIN products p ON qi.product_id = p.id
+      WHERE qi.quotation_id = ?
+    `).all(req.params.id);
+    
+    res.json({ ...quotation, items });
+  });
+
+  app.post("/api/quotations", (req, res) => {
+    const { customer_id, items, total, subtotal, tax } = req.body;
+    
+    const transaction = db.transaction(() => {
+      const quotationInfo = db.prepare(`
+        INSERT INTO quotations (customer_id, total, subtotal, tax)
+        VALUES (?, ?, ?, ?)
+      `).run(customer_id, total, subtotal, tax);
+      
+      const quotationId = quotationInfo.lastInsertRowid;
+      
+      for (const item of items) {
+        db.prepare(`
+          INSERT INTO quotation_items (quotation_id, product_id, quantity, price, subtotal)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(quotationId, item.id, item.quantity, item.price, item.quantity * item.price);
+      }
+      
+      return quotationId;
+    });
+
+    const quotationId = transaction();
+    io.emit('data_changed');
+    res.json({ id: quotationId });
+  });
+
   app.post("/api/sales", (req, res) => {
     const { customer_id, items, total, subtotal, tax, payment_method } = req.body;
     
@@ -441,16 +608,8 @@ async function startServer() {
     });
 
     const saleId = transaction();
+    io.emit('data_changed');
     res.json({ id: saleId });
-  });
-
-  app.get("/api/settings", (req, res) => {
-    const settings = db.prepare("SELECT * FROM settings").all();
-    const settingsObj = settings.reduce((acc: any, curr: any) => {
-      acc[curr.key] = curr.value;
-      return acc;
-    }, {});
-    res.json(settingsObj);
   });
 
   app.post("/api/activate", (req, res) => {
@@ -473,6 +632,7 @@ async function startServer() {
       }
     });
     transaction();
+    io.emit('data_changed');
     res.json({ success: true });
   });
 
@@ -502,12 +662,13 @@ async function startServer() {
       SET name = ?, category_id = ?, purchase_price = ?, sale_price = ?, stock = ?, min_stock = ?, unit = ?, brand = ?, supplier_id = ?, description = ?, image = ?, code = ?
       WHERE id = ?
     `).run(name, category_id, purchase_price, sale_price, stock, min_stock, unit, brand, supplier_id, description, image, code, id);
-    
+    io.emit('data_changed');
     res.json({ success: true, code });
   });
 
   app.delete("/api/products/:id", (req, res) => {
     db.prepare("DELETE FROM products WHERE id = ?").run(req.params.id);
+    io.emit('data_changed');
     res.json({ success: true });
   });
 
@@ -542,23 +703,41 @@ async function startServer() {
   });
 
   app.post("/api/customers", (req, res) => {
-    const { first_name, last_name, phone, email, address } = req.body;
-    const info = db.prepare(`
-      INSERT INTO customers (first_name, last_name, phone, email, address)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(first_name, last_name, phone, email, address);
-    res.json({ id: info.lastInsertRowid });
+    const { first_name, last_name, dni, phone, email, address } = req.body;
+    try {
+      const info = db.prepare(`
+        INSERT INTO customers (first_name, last_name, dni, phone, email, address)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(first_name, last_name, dni, phone, email, address);
+      io.emit('data_changed');
+      res.json({ id: info.lastInsertRowid });
+    } catch (error: any) {
+      if (error.code === 'SQLITE_CONSTRAINT') {
+        res.status(400).json({ error: "El DNI ya está registrado" });
+      } else {
+        res.status(500).json({ error: "Error al crear cliente" });
+      }
+    }
   });
 
   app.put("/api/customers/:id", (req, res) => {
     const { id } = req.params;
-    const { first_name, last_name, phone, email, address } = req.body;
-    db.prepare(`
-      UPDATE customers 
-      SET first_name = ?, last_name = ?, phone = ?, email = ?, address = ?
-      WHERE id = ?
-    `).run(first_name, last_name, phone, email, address, id);
-    res.json({ success: true });
+    const { first_name, last_name, dni, phone, email, address } = req.body;
+    try {
+      db.prepare(`
+        UPDATE customers 
+        SET first_name = ?, last_name = ?, dni = ?, phone = ?, email = ?, address = ?
+        WHERE id = ?
+      `).run(first_name, last_name, dni, phone, email, address, id);
+      io.emit('data_changed');
+      res.json({ success: true });
+    } catch (error: any) {
+      if (error.code === 'SQLITE_CONSTRAINT') {
+        res.status(400).json({ error: "El DNI ya está registrado" });
+      } else {
+        res.status(500).json({ error: "Error al actualizar cliente" });
+      }
+    }
   });
 
   app.put("/api/categories/:id", (req, res) => {
@@ -567,22 +746,30 @@ async function startServer() {
     db.prepare(`
       UPDATE categories SET name = ?, prefix = ?, description = ? WHERE id = ?
     `).run(name, prefix, description, id);
+    io.emit('data_changed');
     res.json({ success: true });
   });
 
   app.delete("/api/categories/:id", (req, res) => {
     db.prepare("DELETE FROM categories WHERE id = ?").run(req.params.id);
+    io.emit('data_changed');
     res.json({ success: true });
   });
 
   app.delete("/api/suppliers/:id", (req, res) => {
     db.prepare("DELETE FROM suppliers WHERE id = ?").run(req.params.id);
+    io.emit('data_changed');
     res.json({ success: true });
   });
 
   app.delete("/api/customers/:id", (req, res) => {
     db.prepare("DELETE FROM customers WHERE id = ?").run(req.params.id);
     res.json({ success: true });
+  });
+
+  // Fallback for non-existent API routes to prevent HTML response
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({ error: `API route ${req.method} ${req.path} not found` });
   });
 
   // Vite middleware for development
@@ -600,7 +787,7 @@ async function startServer() {
   }
 
   const startListening = (port: number) => {
-    const server = app.listen(port, "0.0.0.0", () => {
+    const server = httpServer.listen(port, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${port}`);
     });
 

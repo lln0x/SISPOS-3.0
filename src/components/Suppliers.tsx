@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Supplier } from '../types';
 import { cn } from '../lib/utils';
+import { useDataSync } from '../hooks/useDataSync';
 
 export default function Suppliers() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -32,15 +33,17 @@ export default function Suppliers() {
     notes: ''
   });
 
-  useEffect(() => {
-    fetchSuppliers();
-  }, []);
-
   const fetchSuppliers = () => {
     fetch('/api/suppliers')
       .then(res => res.json())
       .then(setSuppliers);
   };
+
+  useEffect(() => {
+    fetchSuppliers();
+  }, []);
+
+  useDataSync(fetchSuppliers);
 
   const filteredSuppliers = suppliers.filter(s => 
     s.name.toLowerCase().includes(search.toLowerCase()) || 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Store, 
   Ticket, 
@@ -15,6 +15,23 @@ import { motion } from 'motion/react';
 import { AppSettings } from '../types';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
+import { useDataSync } from '../hooks/useDataSync';
+
+const CURRENCIES = [
+  { code: 'S/', name: 'Sol Peruano (PEN)' },
+  { code: '$', name: 'Dólar Estadounidense (USD)' },
+  { code: '€', name: 'Euro (EUR)' },
+  { code: '£', name: 'Libra Esterlina (GBP)' },
+  { code: '¥', name: 'Yen Japonés (JPY)' },
+  { code: 'R$', name: 'Real Brasileño (BRL)' },
+  { code: 'Mex$', name: 'Peso Mexicano (MXN)' },
+  { code: 'CLP', name: 'Peso Chileno (CLP)' },
+  { code: 'COP', name: 'Peso Colombiano (COP)' },
+  { code: 'ARS', name: 'Peso Argentino (ARS)' },
+  { code: 'Bs.', name: 'Boliviano (BOB)' },
+  { code: '₲', name: 'Guaraní Paraguayo (PYG)' },
+  { code: 'U$', name: 'Peso Uruguayo (UYU)' },
+];
 
 export default function Configuration() {
   const [settings, setSettings] = useState<AppSettings>({
@@ -32,38 +49,76 @@ export default function Configuration() {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
+  
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
+  const saveSettings = async (currentSettings: AppSettings) => {
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentSettings)
+      });
+      if (res.ok) {
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 2000);
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Auto-save effect
   useEffect(() => {
+    if (!hasChanges) return;
+    
+    const timer = setTimeout(() => {
+      saveSettings(settings);
+      setHasChanges(false);
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [settings, hasChanges]);
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, field: 'business_logo' | 'user_avatar') => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const newSettings = { ...settings, [field]: reader.result as string };
+        setSettings(newSettings);
+        setHasChanges(true);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const fetchSettings = () => {
+    if (hasChanges) return; // Don't overwrite while typing
     fetch('/api/settings')
       .then(res => res.json())
-      .then(setSettings);
+      .then(data => {
+        setSettings(data);
+        setHasChanges(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchSettings();
   }, []);
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
-    const res = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings)
-    });
-    if (res.ok) {
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
-    }
-    setIsSaving(false);
-  };
+  useDataSync(fetchSettings);
 
   const handleColorChange = async (color: string) => {
     const newSettings = { ...settings, primary_color: color, theme_mode: 'light' };
     setSettings(newSettings);
+    setHasChanges(true);
     document.documentElement.style.setProperty('--primary-color', color);
-    
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newSettings)
-    });
   };
 
   const exportBackup = async () => {
@@ -148,7 +203,7 @@ export default function Configuration() {
           "flex-1 rounded-3xl border shadow-sm overflow-hidden",
           "bg-white border-gray-100"
         )}>
-          <form onSubmit={handleSave} className="p-8">
+          <div className="p-8">
             {activeTab === 'business' && (
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -166,12 +221,16 @@ export default function Configuration() {
                           <Store size={40} className="text-gray-400" />
                         )}
                       </div>
+                      <input 
+                        type="file" 
+                        ref={logoInputRef} 
+                        className="hidden" 
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e, 'business_logo')}
+                      />
                       <button 
                         type="button"
-                        onClick={() => {
-                          const newLogo = prompt('Introduce la URL del logo del negocio:', settings.business_logo);
-                          if (newLogo !== null) setSettings({...settings, business_logo: newLogo});
-                        }}
+                        onClick={() => logoInputRef.current?.click()}
                         className="absolute bottom-0 right-0 w-10 h-10 bg-gray-900 dark:bg-primary text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform"
                       >
                         <Upload size={18} />
@@ -180,6 +239,7 @@ export default function Configuration() {
                     <div className="text-center">
                       <h4 className="font-bold text-gray-900 dark:text-white">Logo del Negocio</h4>
                       <p className="text-xs text-gray-500 dark:text-gray-400">Sube el logo que aparecerá en los tickets.</p>
+                      {isSaving && <p className="text-[10px] text-primary font-bold animate-pulse mt-1">Guardando automáticamente...</p>}
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -188,7 +248,10 @@ export default function Configuration() {
                       type="text"
                       className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
                       value={settings.business_name || ''}
-                      onChange={(e) => setSettings({...settings, business_name: e.target.value})}
+                      onChange={(e) => {
+                        setSettings({...settings, business_name: e.target.value});
+                        setHasChanges(true);
+                      }}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -197,7 +260,10 @@ export default function Configuration() {
                       type="text"
                       className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
                       value={settings.address || ''}
-                      onChange={(e) => setSettings({...settings, address: e.target.value})}
+                      onChange={(e) => {
+                        setSettings({...settings, address: e.target.value});
+                        setHasChanges(true);
+                      }}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -206,7 +272,10 @@ export default function Configuration() {
                       type="text"
                       className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
                       value={settings.phone || ''}
-                      onChange={(e) => setSettings({...settings, phone: e.target.value})}
+                      onChange={(e) => {
+                        setSettings({...settings, phone: e.target.value});
+                        setHasChanges(true);
+                      }}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -215,18 +284,72 @@ export default function Configuration() {
                       type="email"
                       className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
                       value={settings.email || ''}
-                      onChange={(e) => setSettings({...settings, email: e.target.value})}
+                      onChange={(e) => {
+                        setSettings({...settings, email: e.target.value});
+                        setHasChanges(true);
+                      }}
                     />
                   </div>
                   <div className="grid grid-cols-1 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Moneda</label>
-                      <input 
-                        type="text"
-                        className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
-                        value={settings.currency || ''}
-                        onChange={(e) => setSettings({...settings, currency: e.target.value})}
-                      />
+                      <select 
+                        className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white font-bold"
+                        value={settings.currency || 'S/'}
+                        onChange={(e) => {
+                          setSettings({...settings, currency: e.target.value});
+                          setHasChanges(true);
+                        }}
+                      >
+                        {CURRENCIES.map(c => (
+                          <option key={c.code} value={c.code}>{c.name} - {c.code}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2 pt-4 border-t border-gray-100 dark:border-gray-700">
+                    <h4 className="font-bold text-gray-900 dark:text-white mb-4">Cuentas Bancarias (Para Cotizaciones A4)</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Cuenta BCP</label>
+                        <input 
+                          type="text"
+                          className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
+                          value={settings.bank_bcp || ''}
+                          onChange={(e) => {
+                            setSettings({...settings, bank_bcp: e.target.value});
+                            setHasChanges(true);
+                          }}
+                          placeholder="Ej. 193-XXXXXXXX-X-XX"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Cuenta CCI</label>
+                        <input 
+                          type="text"
+                          className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
+                          value={settings.bank_cci || ''}
+                          onChange={(e) => {
+                            setSettings({...settings, bank_cci: e.target.value});
+                            setHasChanges(true);
+                          }}
+                          placeholder="Ej. 002-193XXXXXXXXXXXXXXX"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Yape / Plin</label>
+                        <input 
+                          type="text"
+                          className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
+                          value={settings.bank_yape_plin || ''}
+                          onChange={(e) => {
+                            setSettings({...settings, bank_yape_plin: e.target.value});
+                            setHasChanges(true);
+                          }}
+                          placeholder="Ej. 987654321"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -242,7 +365,10 @@ export default function Configuration() {
                       rows={4}
                       className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
                       value={settings.ticket_message || ''}
-                      onChange={(e) => setSettings({...settings, ticket_message: e.target.value})}
+                      onChange={(e) => {
+                        setSettings({...settings, ticket_message: e.target.value});
+                        setHasChanges(true);
+                      }}
                       placeholder="Ej. ¡Gracias por su preferencia! Vuelva pronto."
                     />
                   </div>
@@ -370,12 +496,16 @@ export default function Configuration() {
                         referrerPolicy="no-referrer"
                       />
                     </div>
+                    <input 
+                      type="file" 
+                      ref={avatarInputRef} 
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={(e) => handleImageUpload(e, 'user_avatar')}
+                    />
                     <button 
                       type="button"
-                      onClick={() => {
-                        const newAvatar = prompt('Introduce la URL de la nueva imagen de perfil:', settings.user_avatar);
-                        if (newAvatar) setSettings({...settings, user_avatar: newAvatar});
-                      }}
+                      onClick={() => avatarInputRef.current?.click()}
                       className="absolute bottom-0 right-0 w-10 h-10 bg-gray-900 dark:bg-primary text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform"
                     >
                       <Upload size={18} />
@@ -384,6 +514,7 @@ export default function Configuration() {
                   <div className="text-center">
                     <h4 className="font-bold text-gray-900 dark:text-white">Foto de Perfil</h4>
                     <p className="text-xs text-gray-500 dark:text-gray-400">Sube una foto para personalizar tu cuenta.</p>
+                    {isSaving && <p className="text-[10px] text-primary font-bold animate-pulse mt-1">Guardando automáticamente...</p>}
                   </div>
                 </div>
 
@@ -394,7 +525,10 @@ export default function Configuration() {
                       type="text"
                       className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
                       value={settings.user_name || ''}
-                      onChange={(e) => setSettings({...settings, user_name: e.target.value})}
+                      onChange={(e) => {
+                        setSettings({...settings, user_name: e.target.value});
+                        setHasChanges(true);
+                      }}
                       placeholder="Ej. Juan Pérez"
                     />
                   </div>
@@ -404,7 +538,10 @@ export default function Configuration() {
                       type="text"
                       className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary dark:text-white"
                       value={settings.user_role || ''}
-                      onChange={(e) => setSettings({...settings, user_role: e.target.value})}
+                      onChange={(e) => {
+                        setSettings({...settings, user_role: e.target.value});
+                        setHasChanges(true);
+                      }}
                       placeholder="Ej. Administrador"
                     />
                   </div>
@@ -450,20 +587,7 @@ export default function Configuration() {
                 </div>
               </div>
             )}
-
-            {activeTab !== 'appearance' && activeTab !== 'backup' && (
-              <div className="mt-10 pt-6 border-t border-gray-100 dark:border-gray-800 flex justify-end">
-                <button 
-                  type="submit"
-                  disabled={isSaving}
-                  className="flex items-center gap-2 px-8 py-3 bg-gray-900 dark:bg-primary text-white font-bold rounded-2xl hover:opacity-90 transition-all shadow-xl shadow-gray-900/20 disabled:opacity-50"
-                >
-                  <Save size={20} />
-                  {isSaving ? 'Guardando...' : 'Guardar Configuración'}
-                </button>
-              </div>
-            )}
-          </form>
+          </div>
         </div>
       </div>
     </div>

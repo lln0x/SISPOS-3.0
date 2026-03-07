@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileText, 
   Download, 
@@ -14,6 +14,17 @@ import autoTable from 'jspdf-autotable';
 
 export default function Reports() {
   const [dateRange, setDateRange] = useState('today');
+  const [earnings, setEarnings] = useState({ income: 0, cost: 0, profit: 0 });
+
+  const fetchEarnings = () => {
+    fetch(`/api/reports/earnings?range=${dateRange}`)
+      .then(res => res.json())
+      .then(setEarnings);
+  };
+
+  useEffect(() => {
+    fetchEarnings();
+  }, [dateRange]);
 
   const reports = [
     { id: 'sales', title: 'Reporte de Ventas', description: 'Resumen detallado de todas las transacciones realizadas.', icon: DollarSign, color: 'bg-green-500' },
@@ -113,7 +124,17 @@ export default function Reports() {
           safeText(`#V${String(s.id).padStart(6, '0')}`),
           safeText(new Date(s.created_at).toLocaleString()),
           safeText(s.first_name ? `${s.first_name} ${s.last_name || ''}` : 'Público General'),
-          safeText(s.payment_method),
+          safeText((() => {
+            try {
+              const payments = JSON.parse(s.payment_method);
+              if (Array.isArray(payments)) {
+                return payments.map((p: any) => `${p.method.replace('_', '/')}: ${formatCurrency(p.amount)}`).join(', ');
+              }
+              return s.payment_method;
+            } catch (e) {
+              return s.payment_method;
+            }
+          })()),
           formatCurrency(s.total)
         ]);
 
@@ -192,15 +213,15 @@ export default function Reports() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
           <div className="p-4 bg-green-50 rounded-xl border border-green-100">
             <p className="text-xs text-green-600 font-bold uppercase">Ingresos Totales</p>
-            <h4 className="text-2xl font-black text-green-700 mt-1">{formatCurrency(12500.45)}</h4>
+            <h4 className="text-2xl font-black text-green-700 mt-1">{formatCurrency(earnings.income)}</h4>
           </div>
           <div className="p-4 bg-red-50 rounded-xl border border-red-100">
-            <p className="text-xs text-red-600 font-bold uppercase">Egresos Totales</p>
-            <h4 className="text-2xl font-black text-red-700 mt-1">{formatCurrency(8400.20)}</h4>
+            <p className="text-xs text-red-600 font-bold uppercase">Costos Totales</p>
+            <h4 className="text-2xl font-black text-red-700 mt-1">{formatCurrency(earnings.cost)}</h4>
           </div>
           <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
             <p className="text-xs text-blue-600 font-bold uppercase">Utilidad Neta</p>
-            <h4 className="text-2xl font-black text-blue-700 mt-1">{formatCurrency(4100.25)}</h4>
+            <h4 className="text-2xl font-black text-blue-700 mt-1">{formatCurrency(earnings.profit)}</h4>
           </div>
         </div>
       </div>

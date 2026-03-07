@@ -14,6 +14,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Customer } from '../types';
 import { cn } from '../lib/utils';
+import { useDataSync } from '../hooks/useDataSync';
 
 export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -23,20 +24,23 @@ export default function Customers() {
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
+    dni: '',
     phone: '',
     email: '',
     address: ''
   });
-
-  useEffect(() => {
-    fetchCustomers();
-  }, []);
 
   const fetchCustomers = () => {
     fetch('/api/customers')
       .then(res => res.json())
       .then(setCustomers);
   };
+
+  useEffect(() => {
+    fetchCustomers();
+  }, []);
+
+  useDataSync(fetchCustomers);
 
   const filteredCustomers = customers.filter(c => 
     `${c.first_name} ${c.last_name}`.toLowerCase().includes(search.toLowerCase()) || 
@@ -57,7 +61,7 @@ export default function Customers() {
     if (res.ok) {
       setIsModalOpen(false);
       setEditingCustomer(null);
-      setFormData({ first_name: '', last_name: '', phone: '', email: '', address: '' });
+      setFormData({ first_name: '', last_name: '', dni: '', phone: '', email: '', address: '' });
       fetchCustomers();
     }
   };
@@ -114,6 +118,7 @@ export default function Customers() {
                       </div>
                       <div>
                         <p className="text-sm font-bold text-gray-900">{customer.first_name} {customer.last_name}</p>
+                        <p className="text-xs text-gray-500">DNI: {customer.dni || 'N/A'}</p>
                         <p className="text-xs text-gray-500">ID: #C{String(customer.id).padStart(4, '0')}</p>
                       </div>
                     </div>
@@ -150,6 +155,7 @@ export default function Customers() {
                           setFormData({
                             first_name: customer.first_name,
                             last_name: customer.last_name || '',
+                            dni: customer.dni || '',
                             phone: customer.phone || '',
                             email: customer.email || '',
                             address: customer.address || ''
@@ -207,6 +213,10 @@ export default function Customers() {
                     <label className="text-sm font-bold text-gray-700">Apellido</label>
                     <input type="text" className="w-full px-4 py-2.5 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-green-500" value={formData.last_name || ''} onChange={(e) => setFormData({...formData, last_name: e.target.value})} />
                   </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-bold text-gray-700">DNI / RUC</label>
+                  <input required type="text" className="w-full px-4 py-2.5 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-green-500" value={formData.dni || ''} onChange={(e) => setFormData({...formData, dni: e.target.value})} />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-bold text-gray-700">Teléfono</label>

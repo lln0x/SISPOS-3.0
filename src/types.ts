@@ -45,6 +45,7 @@ export interface Customer {
   id: number;
   first_name: string;
   last_name: string;
+  dni: string;
   phone: string;
   email: string;
   address: string;
@@ -59,13 +60,18 @@ export interface SaleItem {
   subtotal: number;
 }
 
+export interface Payment {
+  method: 'cash' | 'card' | 'transfer' | 'yape_plin';
+  amount: number;
+}
+
 export interface Sale {
   id: number;
   customer_id?: number;
   total: number;
   subtotal: number;
   tax: number;
-  payment_method: 'cash' | 'card' | 'transfer';
+  payment_method: string; // Stores JSON string of Payment[]
   created_at: string;
   items?: SaleItem[];
 }
@@ -87,4 +93,8 @@ export interface AppSettings {
   user_name?: string;
   user_role?: string;
   user_avatar?: string;
+  // Bank Details
+  bank_bcp?: string;
+  bank_cci?: string;
+  bank_yape_plin?: string;
 }

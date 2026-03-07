@@ -31,6 +31,7 @@ import Suppliers from './components/Suppliers';
 import Customers from './components/Customers';
 import Reports from './components/Reports';
 import Configuration from './components/Configuration';
+import { useDataSync } from './hooks/useDataSync';
 
 type Section = 'dashboard' | 'pos' | 'inventory' | 'categories' | 'suppliers' | 'customers' | 'reports' | 'settings';
 
@@ -145,21 +146,6 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  useEffect(() => {
-    fetchSettings();
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (settings) {
-      document.documentElement.classList.remove('dark');
-      if (settings.primary_color) {
-        document.documentElement.style.setProperty('--primary-color', settings.primary_color);
-      }
-    }
-  }, [settings]);
-
   const fetchSettings = async () => {
     try {
       const res = await fetch('/api/settings');
@@ -171,6 +157,23 @@ export default function App() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchSettings();
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useDataSync(fetchSettings);
+
+  useEffect(() => {
+    if (settings) {
+      document.documentElement.classList.remove('dark');
+      if (settings.primary_color) {
+        document.documentElement.style.setProperty('--primary-color', settings.primary_color);
+      }
+    }
+  }, [settings]);
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },

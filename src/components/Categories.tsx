@@ -3,6 +3,7 @@ import { Plus, Edit, Trash2, X, Tags, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Category } from '../types';
 import { cn } from '../lib/utils';
+import { useDataSync } from '../hooks/useDataSync';
 
 export default function Categories() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -15,15 +16,17 @@ export default function Categories() {
     description: ''
   });
 
-  useEffect(() => {
-    fetchCategories();
-  }, []);
-
   const fetchCategories = () => {
     fetch('/api/categories')
       .then(res => res.json())
       .then(setCategories);
   };
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  useDataSync(fetchCategories);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

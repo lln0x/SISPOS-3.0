@@ -24,6 +24,7 @@ import {
   Pie
 } from 'recharts';
 import { formatCurrency, cn } from '../lib/utils';
+import { useDataSync } from '../hooks/useDataSync';
 
 const data = [
   { name: 'Lun', sales: 4000 },
@@ -47,11 +48,17 @@ const COLORS = ['#22c55e', '#16a34a', '#4ade80', '#86efac'];
 export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
 
-  useEffect(() => {
+  const fetchData = () => {
     fetch('/api/dashboard/stats')
       .then(res => res.json())
       .then(data => setStats(data));
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
+
+  useDataSync(fetchData);
 
   const cards = [
     { 

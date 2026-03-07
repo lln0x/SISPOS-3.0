@@ -18,6 +18,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Product, Category, Supplier } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
+import { useDataSync } from '../hooks/useDataSync';
 
 export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -50,10 +51,6 @@ export default function Inventory() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
   const fetchData = () => {
     Promise.all([
       fetch('/api/products').then(res => res.json()),
@@ -65,6 +62,12 @@ export default function Inventory() {
       setSuppliers(s);
     });
   };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  useDataSync(fetchData);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
